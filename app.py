@@ -22,13 +22,24 @@ app = Flask(__name__)
 
 HTML = """
 <!doctype html><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">   <!-- ★追加 -->
 <title>AIえほん β</title>
 <style>
-body{font-family:sans-serif;max-width:460px;margin:2rem auto}
-label{display:block;margin:.4rem 0}
-button{margin-top:.8rem}
-#msg{margin-top:1rem;color:#d00}
+:root{font-size:18px}                /* ★全体の基準フォント ↑ */
+@media (min-width:600px){:root{font-size:16px}} /* PCでは元に戻す */
+
+body{font-family:sans-serif;max-width:460px;margin:2rem auto;padding:0 1rem}
+label{display:block;margin:.6rem 0}
+select,button{font-size:1rem;padding:.4rem .6rem;width:100%}
+button{margin-top:1rem}
+#msg{margin-top:1.2rem;color:#d00}
+.page{margin-top:1.5rem;text-align:center}
+.page img{width:100%;border-radius:8px;box-shadow:0 2px 8px #0002}
+.page p{margin-top:.8rem;line-height:1.5em;text-align:left}
+nav{display:flex;justify-content:space-between;margin-top:1rem}
+nav button{width:48%}
 </style>
+
 
 <h2>AI えほんをつくる</h2>
 <form id="f">
@@ -54,34 +65,26 @@ button{margin-top:.8rem}
 <script>
 const form = document.getElementById('f');
 const btn  = form.querySelector('button');
-const link = document.getElementById('dl');
 const msg  = document.getElementById('msg');
+const viewer = document.createElement('div'); document.body.appendChild(viewer);
 
-form.onsubmit = async (e) => {
-  e.preventDefault();
-  btn.disabled = true;
-  link.style.display = "none";
-  msg.textContent = "🚀 生成中… 1〜2 分お待ちください";
+form.onsubmit = async e=>{
+  e.preventDefault(); btn.disabled=true; viewer.innerHTML=""; msg.textContent="🚀 生成中…";
 
-  try {
-    const res = await fetch("/api/generate", { method:"POST", body:new FormData(form) });
-    let data;
-    try { data = await res.json(); }
-    catch { throw new Error("サーバーエラー（HTML が返った）"); }
+  const res = await fetch("/api/book", {method:"POST", body:new FormData(form)});
+  const data = await res.json().catch(()=>msg.textContent="❌ JSONエラー");
+  if(data.error){msg.textContent="❌ "+data.error;btn.disabled=false;return;}
 
-    if (data.error) throw new Error(data.error);
-
-    link.href = "/pdf/" + data.file;
-    link.textContent = "📥 " + data.file + " をダウンロード";
-    link.style.display = "block";
-    msg.textContent = "✅ 完了！";
-  } catch (err) {
-    msg.textContent = "❌ エラー: " + err.message;
-  } finally {
-    btn.disabled = false;
-  }
+  msg.textContent="✅ 完了！ 画面をスクロールして読んでね";
+  data.pages.forEach((pg,i)=>{
+    const div=document.createElement('div');div.className="page";
+    div.innerHTML=`<img src="${pg.img}"><p>${pg.text}</p>`;
+    viewer.appendChild(div);
+  });
+  btn.disabled=false;
 };
 </script>
+
 """
 
 def story_prompt(age, gender, hero, theme):
@@ -163,3 +166,30 @@ def download(name): return send_file(f"/tmp/{name}", as_attachment=True)
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     app.run(host="0.0.0.0", port=port)
+
+@app.route("/api/book", methods=["POST"])
+def api_book():
+    try:
+        f = request.form
+        # 1) ストーリー 3 シーン
+        rsp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role":"system",
+                       "content": story_prompt(f['age'],f['gender'],f['hero'],f['theme'])}],
+            max_tokens=700,
+            response_format={"type":"json_object"})
+        story = json.loads(rsp.choices[0].message.content)["story"][:3]
+
+        # 2) 各シーンの挿絵 URL
+        pages=[]
+        for sc in story:
+            url = client.images.generate(
+                model="dall-e-3",
+                prompt=f"Children's picture book illustration, {sc[:80]}",
+                n=1,size="1024x1024").data[0].url
+            pages.append({"img":url,"text":sc})
+
+        return jsonify({"pages":pages})
+    except Exception as e:
+        traceback.print_exc(file=sys.stderr)
+        return jsonify({"error":str(e)}),500
