@@ -1,0 +1,6 @@
+openai>=1,<2
+flask>=3
+pillow
+reportlab
+python-dotenv
+requests
