@@ -1,29 +1,53 @@
-# app.py  ─ Flask 1 ファイル構成
-from flask import Flask, render_template_string, request, jsonify
-import os, json
+# app.py ─ Flask 1 ファイル構成
+from flask import Flask, render_template_string, request, jsonify, send_file
+import os, io, json, textwrap, datetime, requests, traceback, sys
 from dotenv import load_dotenv
 from openai import OpenAI
+from PIL import Image
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen.canvas import Canvas
+from reportlab.lib.utils import ImageReader
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
-load_dotenv()
-client = OpenAI(api_key=os.getenv("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"))
+load_dotenv()                          # .env を読む
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))  # ★ ハードコード禁止
+
+pdfmetrics.registerFont(
+    TTFont("JPFont", "fonts/NotoSansJP-Bold.ttf")
+)
+IMG_SIZE, MARGIN = 512, 40
 
 app = Flask(__name__)
 
 HTML = """
 <!doctype html><meta charset="utf-8">
 <title>AIえほん β</title>
-<style>body{font-family:sans-serif;max-width:500px;margin:2rem auto}</style>
+<style>
+body{font-family:sans-serif;max-width:460px;margin:2rem auto}
+label{display:block;margin:.4rem 0}
+button{margin-top:.8rem}
+#msg{margin-top:1rem;color:#d00}
+</style>
 
 <h2>AI えほんをつくる</h2>
 <form id="f">
-  年齢:<select name="age">{% for a in range(0,11) %}<option>{{a}}</option>{% endfor %}</select><br>
-  性別:<select name="gender"><option>おとこのこ</option><option>おんなのこ</option></select><br>
-  主人公:<select name="hero"><option>ロボット</option><option>くるま</option><option>魔法使い</option><option>子ども本人</option></select><br>
-  テーマ:<select name="theme"><option>友情</option><option>冒険</option><option>挑戦</option><option>家族</option><option>学び</option></select><br>
+  <label>年齢:
+    <select name="age">{% for a in range(0,11) %}<option>{{a}}</option>{% endfor %}</select>
+  </label>
+  <label>性別:
+    <select name="gender"><option>おとこのこ</option><option>おんなのこ</option></select>
+  </label>
+  <label>主人公:
+    <select name="hero"><option>ロボット</option><option>くるま</option><option>魔法使い</option><option>子ども本人</option></select>
+  </label>
+  <label>テーマ:
+    <select name="theme"><option>友情</option><option>冒険</option><option>挑戦</option><option>家族</option><option>学び</option></select>
+  </label>
   <button>PDF を生成</button>
 </form>
 
-<p id="msg" style="margin-top:1rem;"></p>
+<p id="msg"></p>
 <a id="dl" style="display:none"></a>
 <hr>
 
@@ -40,17 +64,17 @@ form.onsubmit = async (e) => {
   msg.textContent = "🚀 生成中… 1〜2 分お待ちください";
 
   try {
-    const res  = await fetch("/api/generate", {        // ← api/story → api/generate
-      method: "POST",
-      body: new FormData(form),
-    });
-    const data = await res.json();
+    const res = await fetch("/api/generate", { method:"POST", body:new FormData(form) });
+    let data;
+    try { data = await res.json(); }
+    catch { throw new Error("サーバーエラー（HTML が返った）"); }
+
     if (data.error) throw new Error(data.error);
 
-    link.href        = "/pdf/" + data.file;
+    link.href = "/pdf/" + data.file;
     link.textContent = "📥 " + data.file + " をダウンロード";
     link.style.display = "block";
-    msg.textContent  = "✅ 完了！";
+    msg.textContent = "✅ 完了！";
   } catch (err) {
     msg.textContent = "❌ エラー: " + err.message;
   } finally {
@@ -60,57 +84,64 @@ form.onsubmit = async (e) => {
 </script>
 """
 
-
-PROMPT = """あなたは幼児向け児童文学作家です。
-# 条件
-・対象年齢: {age}歳
-・読者の性別: {gender}
-・主人公: {hero}
-・テーマ: {theme}
-# 制約
-・全5シーン構成（起→承→転→結→まとめ）
-・ひらがな 80％・カタカナ 10％・漢字 10％以内
-・総文字数 400〜550字
-# 出力形式（JSON）
-{{"title":"タイトル","story":["シーン1","シーン2","シーン3","シーン4","シーン5"]}}
+def story_prompt(age, gender, hero, theme):
+    return f"""
+あなたは幼児向け児童文学作家です。
+・対象年齢:{age}歳 ・読者の性別:{gender} ・主人公:{hero} ・テーマ:{theme}
+・全5シーン構成(起承転結まとめ)・総文字数400〜550字
+JSON={{"title":"タイトル","story":["シーン1","シーン2","シーン3","シーン4","シーン5"]}}
 """
+
+def generate_pdf(data):
+    title, scenes = data["title"], data["story"]
+    # --- 画像を生成 ---
+    images=[]
+    for sc in scenes:
+        url = client.images.generate(
+            model="dall-e-3",
+            prompt=f"Children's picture book illustration, {sc[:80]}",
+            n=1,
+            size="1024x1024").data[0].url
+        img = Image.open(requests.get(url,stream=True).raw).resize((IMG_SIZE,IMG_SIZE))
+        images.append(img)
+
+    # --- PDF を /tmp に保存 ---
+    filename=f"book_{datetime.datetime.now():%Y%m%d_%H%M%S}.pdf"
+    path=f"/tmp/{filename}"
+    c=Canvas(path,pagesize=A4); W,H=A4
+    for i,scene in enumerate(scenes):
+        c.drawImage(ImageReader(images[i]),MARGIN,H-IMG_SIZE-MARGIN,IMG_SIZE,IMG_SIZE)
+        if i==0:
+            c.setFont("JPFont",14); c.drawString(MARGIN,H-IMG_SIZE-MARGIN-20,f"『{title}』")
+        c.setFont("JPFont",11)
+        txt=c.beginText(MARGIN,H-IMG_SIZE-MARGIN-40)
+        txt.textLines(textwrap.fill(scene,38))
+        c.drawText(txt); c.showPage()
+    c.save()
+    return filename
 
 @app.route("/")
 def index(): return render_template_string(HTML)
 
-@app.route("/api/story", methods=["POST"])
-def api_gen():
+@app.route("/api/generate", methods=["POST"])
+def api_generate():
     try:
         f = request.form
-        # 1) ストーリー JSON を生成
         rsp = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{
-                "role": "system",
-                "content": story_prompt(f['age'], f['gender'], f['hero'], f['theme'])
-            }],
+            messages=[{"role":"system",
+                       "content": story_prompt(f['age'],f['gender'],f['hero'],f['theme'])}],
             max_tokens=700,
-            response_format={"type": "json_object"}
-        )
-        story_data = json.loads(rsp.choices[0].message.content)
-
-        # 2) PDF を作成し /tmp に保存
-        pdfname = generate_pdf(story_data)   # ← generate_pdf() の戻り値がファイル名
-
-        # 3) フロントへファイル名を返す
+            response_format={"type":"json_object"})
+        pdfname = generate_pdf(json.loads(rsp.choices[0].message.content))
         return jsonify({"file": pdfname})
-
     except Exception as e:
-        import traceback, sys
-        traceback.print_exc(file=sys.stderr)   # スタックトレースを Logs に出力
+        traceback.print_exc(file=sys.stderr)
         return jsonify({"error": str(e)}), 500
 
-
-
-if __name__=="__main__":
-    app.run(debug=True)
+@app.route("/pdf/<name>")
+def download(name): return send_file(f"/tmp/{name}", as_attachment=True)
 
 if __name__ == "__main__":
-    import os
-    port = int(os.getenv("PORT", 8000))  # Render が PORT を渡す
+    port = int(os.getenv("PORT", 8000))
     app.run(host="0.0.0.0", port=port)
