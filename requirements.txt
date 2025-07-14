@@ -1,6 +1,6 @@
 openai>=1,<2
 flask>=3
-gunicorn             ←★ これを追加
+gunicorn
 pillow
 reportlab
 python-dotenv
