@@ -53,20 +53,38 @@ PROMPT = """あなたは幼児向け児童文学作家です。
 def index(): return render_template_string(HTML)
 
 @app.route("/api/story", methods=["POST"])
-def story():
-    form=request.form
-    msg=PROMPT.format(age=form["age"],gender=form["gender"],hero=form["hero"],theme=form["theme"])
+def api_gen():
     try:
-        rsp=client.chat.completions.create(
+        f = request.form
+        # 1) ストーリー JSON を生成
+        rsp = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role":"system","content":msg}],
-            max_tokens=450,
-            temperature=0.9,
-            response_format={"type":"json_object"}
+            messages=[{
+                "role": "system",
+                "content": story_prompt(f['age'], f['gender'], f['hero'], f['theme'])
+            }],
+            max_tokens=700,
+            response_format={"type": "json_object"}
         )
-        return rsp.choices[0].message.content   # すでに JSON
+        story_data = json.loads(rsp.choices[0].message.content)
+
+        # 2) PDF を作成し /tmp に保存
+        pdfname = generate_pdf(story_data)   # ← generate_pdf() の戻り値がファイル名
+
+        # 3) フロントへファイル名を返す
+        return jsonify({"file": pdfname})
+
     except Exception as e:
-        return jsonify({"error":str(e)}),500
+        import traceback, sys
+        traceback.print_exc(file=sys.stderr)   # スタックトレースを Logs に出力
+        return jsonify({"error": str(e)}), 500
+
+
 
 if __name__=="__main__":
     app.run(debug=True)
+
+if __name__ == "__main__":
+    import os
+    port = int(os.getenv("PORT", 8000))  # Render が PORT を渡す
+    app.run(host="0.0.0.0", port=port)
