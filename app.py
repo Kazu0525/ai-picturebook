@@ -93,32 +93,47 @@ JSON={{"title":"タイトル","story":["シーン1","シーン2","シーン3","�
 """
 
 def generate_pdf(data):
+    """ストーリーJSON → 挿絵付きPDF を /tmp に保存してファイル名を返す"""
     title, scenes = data["title"], data["story"]
-    # --- 画像を生成 ---
-    images=[]
-    for sc in scenes:
-        url = client.images.generate(
-            model="dall-e-3",
-            prompt=f"Children's picture book illustration, {sc[:80]}",
-            n=1,
-            size="1024x1024").data[0].url
-        img = Image.open(requests.get(url,stream=True).raw).resize((IMG_SIZE,IMG_SIZE))
-        images.append(img)
 
-    # --- PDF を /tmp に保存 ---
-    filename=f"book_{datetime.datetime.now():%Y%m%d_%H%M%S}.pdf"
-    path=f"/tmp/{filename}"
-    c=Canvas(path,pagesize=A4); W,H=A4
-    for i,scene in enumerate(scenes):
-        c.drawImage(ImageReader(images[i]),MARGIN,H-IMG_SIZE-MARGIN,IMG_SIZE,IMG_SIZE)
-        if i==0:
-            c.setFont("JPFont",14); c.drawString(MARGIN,H-IMG_SIZE-MARGIN-20,f"『{title}』")
-        c.setFont("JPFont",11)
-        txt=c.beginText(MARGIN,H-IMG_SIZE-MARGIN-40)
-        txt.textLines(textwrap.fill(scene,38))
-        c.drawText(txt); c.showPage()
-    c.save()
+    # 保存先ファイル名
+    filename = f"book_{datetime.datetime.now():%Y%m%d_%H%M%S}.pdf"
+    path = f"/tmp/{filename}"
+
+    canvas = Canvas(path, pagesize=A4)
+    W, H = A4
+
+    for idx, scene in enumerate(scenes):
+        # 1) ---- 画像を生成して即メモリ解放 ----
+        url = client.images.generate(
+            model="dall-e-3",                       # DALL·E 2 なら size="512x512"
+            prompt=f"Children's picture-book illustration, {scene[:80]}",
+            n=1,
+            size="1024x1024"
+        ).data[0].url
+
+        with Image.open(requests.get(url, stream=True).raw) as img:     # ← with で自動 close
+            img = img.resize((IMG_SIZE, IMG_SIZE), Image.LANCZOS)
+            canvas.drawImage(ImageReader(img),
+                             MARGIN, H - IMG_SIZE - MARGIN,
+                             IMG_SIZE, IMG_SIZE)
+
+        # 2) ---- テキストを配置 ----
+        if idx == 0:
+            canvas.setFont("JPFont", 14)
+            canvas.drawString(MARGIN, H - IMG_SIZE - MARGIN - 20,
+                              f"『{title}』")
+
+        canvas.setFont("JPFont", 11)
+        txt = canvas.beginText(MARGIN, H - IMG_SIZE - MARGIN - 40)
+        txt.textLines(textwrap.fill(scene, 38))     # 38 文字で折り返し
+        canvas.drawText(txt)
+
+        canvas.showPage()
+
+    canvas.save()
     return filename
+
 
 @app.route("/")
 def index(): return render_template_string(HTML)
