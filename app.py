@@ -11,29 +11,55 @@ app = Flask(__name__)
 
 HTML = """
 <!doctype html><meta charset="utf-8">
-<title>AIえほん β</title><style>body{font-family:sans-serif;max-width:480px;margin:40px auto}</style>
+<title>AIえほん β</title>
+<style>body{font-family:sans-serif;max-width:500px;margin:2rem auto}</style>
+
 <h2>AI えほんをつくる</h2>
 <form id="f">
-<label>年齢 <select name="age">
-{% for a in range(0,11) %}<option value="{{a}}">{{a}}</option>{% endfor %}</select></label><br><br>
-<label>性別 <select name="gender"><option>おとこのこ</option><option>おんなのこ</option></select></label><br><br>
-<label>主人公 <select name="hero"><option>ロボット</option><option>くるま</option><option>魔法使い</option><option>子ども本人</option></select></label><br><br>
-<label>テーマ <select name="theme"><option>友情</option><option>冒険</option><option>挑戦</option><option>家族</option><option>学び</option></select></label><br><br>
-<button>おはなしをつくる</button>
-</form><hr>
-<pre id="out"></pre>
+  年齢:<select name="age">{% for a in range(0,11) %}<option>{{a}}</option>{% endfor %}</select><br>
+  性別:<select name="gender"><option>おとこのこ</option><option>おんなのこ</option></select><br>
+  主人公:<select name="hero"><option>ロボット</option><option>くるま</option><option>魔法使い</option><option>子ども本人</option></select><br>
+  テーマ:<select name="theme"><option>友情</option><option>冒険</option><option>挑戦</option><option>家族</option><option>学び</option></select><br>
+  <button>PDF を生成</button>
+</form>
+
+<p id="msg" style="margin-top:1rem;"></p>
+<a id="dl" style="display:none"></a>
+<hr>
+
 <script>
-f.onsubmit = async (e)=>{e.preventDefault();
-  out.textContent="生成中…";
-  const fd=new FormData(f);
-  const r=await fetch("/api/story",{method:"POST",body:fd});
-  const j=await r.json();
-  if(j.error){out.textContent=j.error}else{
-    out.innerHTML="<h3>"+j.title+"</h3>"+j.story.join("<br><br>");
+const form = document.getElementById('f');
+const btn  = form.querySelector('button');
+const link = document.getElementById('dl');
+const msg  = document.getElementById('msg');
+
+form.onsubmit = async (e) => {
+  e.preventDefault();
+  btn.disabled = true;
+  link.style.display = "none";
+  msg.textContent = "🚀 生成中… 1〜2 分お待ちください";
+
+  try {
+    const res  = await fetch("/api/generate", {        // ← api/story → api/generate
+      method: "POST",
+      body: new FormData(form),
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+
+    link.href        = "/pdf/" + data.file;
+    link.textContent = "📥 " + data.file + " をダウンロード";
+    link.style.display = "block";
+    msg.textContent  = "✅ 完了！";
+  } catch (err) {
+    msg.textContent = "❌ エラー: " + err.message;
+  } finally {
+    btn.disabled = false;
   }
-}
+};
 </script>
 """
+
 
 PROMPT = """あなたは幼児向け児童文学作家です。
 # 条件
