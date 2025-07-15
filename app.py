@@ -1,106 +1,127 @@
-
-import os, random, sys, json, traceback
-from flask import Flask, request, jsonify
-from dotenv import load_dotenv
-from reportlab.pdfgen import canvas
+import os, random, sys, traceback, json
+from flask import Flask, request, jsonify, send_from_directory, render_template_string
+from openai import OpenAI
+from reportlab.pdfgen.canvas import Canvas
 from reportlab.lib.pagesizes import A4
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.lib.utils import ImageReader
 from PIL import Image
-import openai
+from io import BytesIO
 import requests
+from datetime import datetime
 
-load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
-client = openai
-
+client = OpenAI()
 app = Flask(__name__)
 
-font_path = "fonts/NotoSansJP-Bold.ttf"
-pdfmetrics.registerFont(TTFont("JPFont", font_path))
+HTML = """
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>あなただけのえほん</title>
+  <style>
+    body { font-family: sans-serif; background: #fff0f5; text-align: center; padding: 1em; }
+    label, select, input { font-size: 1.2em; margin: 0.5em; }
+    button { font-size: 1.3em; padding: 0.6em 2em; background: #ff69b4; color: white; border: none; border-radius: 10px; }
+    button:hover { background: #ff1493; }
+    .error { color: red; margin-top: 1em; }
+  </style>
+</head>
+<body>
+  <h2>あなただけのえほん</h2>
+  <form id="form">
+    <div><label>なんさい？<select name="age">
+      <option>3</option><option>4</option><option>5</option><option>6</option><option>7</option>
+    </select></label></div>
+    <div><label>おとこのこ と おんなのこ のどっち？<select name="gender">
+      <option>おとこのこ</option><option>おんなのこ</option>
+    </select></label></div>
+    <div><label>しゅじんこうは？<select name="hero">
+      <option>ロボット</option><option>くるま</option><option>まほうつかい</option><option>じぶん</option>
+    </select></label></div>
+    <div><label>テーマは？<select name="theme">
+      <option>ゆうじょう</option><option>ぼうけん</option><option>ちょうせん</option><option>かぞく</option><option>まなび</option>
+    </select></label></div>
+    <button type="submit">えほんをつくる</button>
+    <div class="error" id="err"></div>
+  </form>
 
-def story_prompt(age, gender, hero, theme):
-    return f"""
-あなたは日本の子ども向け絵本作家です。
-読者は{age}の{gender}です。
-主人公は「{hero}」で、テーマは「{theme}」です。
-すべての漢字には必ずふりがなをつけてください。
-句点「。」ごとに区切って、1文ずつの配列JSONで返してください。
-文章はやさしいひらがなで、心温まる結末にしてください。
+  <script>
+    form.onsubmit = async e => {
+      e.preventDefault();
+      err.textContent = "";
+      const fd = new FormData(form);
+      const res = await fetch("/api/book", { method: "POST", body: fd });
+      if (res.headers.get("content-type").includes("application/json")) {
+        const j = await res.json();
+        if (j.error) err.textContent = "エラー: " + j.error;
+      } else {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "ehon.pdf";
+        a.click();
+      }
+    };
+  </script>
+</body>
+</html>
 """
-
-def dall_e(prompt):
-    res = client.images.generate(
-        model="dall-e-3",
-        prompt=prompt + " 日本人の子ども向け、かわいい絵本のイラスト。文字なし。",
-        size="1024x1024",
-        quality="standard",
-        n=1,
-        response_format="url"
-    )
-    return res.data[0].url
-
-def generate_pdf(story, hero_tag=""):
-    from datetime import datetime
-    filename = f"output/book_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-    os.makedirs("output", exist_ok=True)
-    c = canvas.Canvas(filename, pagesize=A4)
-    width, height = A4
-
-    for i, page in enumerate(story):
-        try:
-            url = dall_e(page[:60] + " " + hero_tag)
-            img_data = requests.get(url).content
-            img_path = f"output/temp_img_{i}.png"
-            with open(img_path, "wb") as f:
-                f.write(img_data)
-
-            img = Image.open(img_path)
-            img_width = width * 0.8
-            aspect = img.height / img.width
-            img_height = img_width * aspect
-            c.drawImage(ImageReader(img_path), (width - img_width) / 2, height - img_height - 60, width=img_width, height=img_height)
-            img.close()
-
-            text_y = height - img_height - 80
-            c.setFont("JPFont", 20)
-            for line in page.split("。"):
-                c.drawString(50, text_y, line.strip() + "。")
-                text_y -= 24
-        except Exception as e:
-            traceback.print_exc()
-            c.setFont("JPFont", 14)
-            c.drawString(50, 500, f"エラーが発生しました: {str(e)}")
-
-        c.showPage()
-
-    c.save()
-    return filename
 
 @app.route("/")
 def index():
-    return """
-<html>
-  <head><title>あなただけのえほん</title></head>
-  <body style="background-color:#fff0f5; font-family:sans-serif; text-align:center;">
-    <h2 style="color:#d63384;">あなただけのえほん</h2>
-    <form action="/api/book" method="POST">
-      <label>なんさい？ <input name="age" /></label><br/><br/>
-      <label>おとこのこ？おんなのこ？
-        <select name="gender"><option>おとこのこ</option><option>おんなのこ</option></select>
-      </label><br/><br/>
-      <label>しゅじんこうは？
-        <select name="hero"><option>ロボット</option><option>くるま</option><option>まほうつかい</option><option>じぶん</option></select>
-      </label><br/><br/>
-      <label>テーマは？
-        <select name="theme"><option>ゆうじょう</option><option>ぼうけん</option><option>ちょうせん</option><option>かぞく</option><option>まなび</option></select>
-      </label><br/><br/>
-      <button type="submit">えほんをつくる</button>
-    </form>
-  </body>
-</html>
+    return render_template_string(HTML)
+
+def story_prompt(age, gender, hero, theme):
+    return f"""あなたは子ども向け絵本のストーリー作家です。
+すべて「ひらがな」で、{age}さいの{gender}のために、しゅじんこうが「{hero}」で、テーマは「{theme}」のストーリーをかいてください。
+
+さいごはこころがあたたかくなるハッピーエンドにしてください。
+こたえは「ストーリー」というキーでJSONオブジェクトにしてください。
 """
+
+def dall_e(prompt):
+    rsp = client.images.generate(
+        model="dall-e-3",
+        prompt=prompt + "\n（日本のこどもがすきなやわらかいタッチ、かわいい）",
+        size="1024x1024",
+        quality="standard",
+        n=1,
+    )
+    return rsp.data[0].url
+
+def generate_pdf(story_list):
+    dt = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = f"output/book_{dt}.pdf"
+    os.makedirs("output", exist_ok=True)
+    c = Canvas(path, pagesize=A4)
+
+    for scene in story_list:
+        try:
+            # 画像を生成・取得
+            url = dall_e(scene[:60])
+            img_data = requests.get(url).content
+            img = Image.open(BytesIO(img_data))
+
+            # サイズ調整
+            w, h = A4
+            img = img.resize((int(w), int(w)))
+            img_io = BytesIO()
+            img.save(img_io, format='PNG')
+            img_io.seek(0)
+            c.drawImage(ImageReader(img_io), 0, h - w)
+
+            # テキスト描画
+            c.setFont("Helvetica", 20)
+            c.drawString(50, h - w - 40, scene[:60])
+
+            # ページ切り替え
+            c.showPage()
+            img.close()
+        except Exception as e:
+            print("画像生成エラー:", e)
+
+    c.save()
+    return path
 
 @app.route("/api/book", methods=["POST"])
 def api_book():
@@ -109,14 +130,17 @@ def api_book():
         prompt = story_prompt(f["age"], f["gender"], f["hero"], f["theme"])
         rsp = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role":"system","content": prompt}],
-            max_tokens=700,
-            temperature=0.9,
-            response_format={"type":"json_object"}
+            messages=[{"role": "system", "content": prompt}],
+            max_tokens=800,
+            temperature=0.8,
+            response_format={"type": "json_object"}
         )
-        story = json.loads(rsp.choices[0].message.content)["ストーリー"]
-        pdf = generate_pdf(story, f["hero"])
-        return jsonify({"file": pdf})
+        res = json.loads(rsp.choices[0].message.content)
+        story = res.get("ストーリー")
+        if not story:
+            raise ValueError("ストーリーの生成に失敗しました")
+        pdfname = generate_pdf(story)
+        return send_from_directory("output", os.path.basename(pdfname), as_attachment=True)
     except Exception as e:
-        traceback.print_exc()
+        traceback.print_exc(file=sys.stderr)
         return jsonify({"error": str(e)}), 500
