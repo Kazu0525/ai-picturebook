@@ -29,7 +29,12 @@ HTML = """
   <h2>あなただけのえほん</h2>
   <form id="form">
     <div><label>なんさい？<select name="age">
-      <option>3</option><option>4</option><option>5</option><option>6</option><option>7</option>
+      <option>0〜1さい</option>
+      <option>2〜3さい</option>
+      <option>4さい</option>
+      <option>5〜6さい</option>
+      <option>7〜8さい</option>
+      <option>9〜10さい</option>
     </select></label></div>
     <div><label>おとこのこ と おんなのこ のどっち？<select name="gender">
       <option>おとこのこ</option><option>おんなのこ</option>
@@ -40,31 +45,44 @@ HTML = """
     <div><label>テーマは？<select name="theme">
       <option>ゆうじょう</option><option>ぼうけん</option><option>ちょうせん</option><option>かぞく</option><option>まなび</option>
     </select></label></div>
-    <button type="submit">えほんをつくる</button>
+    <button id="submit-btn" type="submit">えほんをつくる</button>
     <div class="error" id="err"></div>
   </form>
 
   <script>
-    form.onsubmit = async e => {
+    document.getElementById("form").addEventListener("submit", async function(e) {
       e.preventDefault();
-      err.textContent = "";
-      const fd = new FormData(form);
-      const res = await fetch("/api/book", { method: "POST", body: fd });
-      if (res.headers.get("content-type").includes("application/json")) {
-        const j = await res.json();
-        if (j.error) err.textContent = "エラー: " + j.error;
-      } else {
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "ehon.pdf";
-        a.click();
+      const err = document.getElementById("err");
+      err.textContent = "えほんを作成中です…"; // ローディング表示
+      const fd = new FormData(this);
+      try {
+        const res = await fetch("/api/book", {
+          method: "POST",
+          body: fd
+        });
+        if (res.headers.get("content-type")?.includes("application/json")) {
+          const j = await res.json();
+          if (j.error) {
+            err.textContent = "エラー: " + j.error;
+          }
+        } else {
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "ehon.pdf";
+          a.click();
+          err.textContent = "";
+        }
+      } catch (e) {
+        console.error(e);
+        err.textContent = "通信エラーが発生しました";
       }
-    };
+    });
   </script>
 </body>
 </html>
+
 """
 
 @app.route("/")
