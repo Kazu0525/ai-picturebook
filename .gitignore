@@ -1,3 +1,6 @@
 .env
 *.pdf
 credentials.json
+# VS Code バックアップ
+version/
+*.m4a
