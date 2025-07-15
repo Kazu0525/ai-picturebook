@@ -28,14 +28,18 @@ HTML = """
 <body>
   <h2>あなただけのえほん</h2>
   <form id="form">
-    <div><label>なんさい？<select name="age">
-      <option>0〜1さい</option>
-      <option>2〜3さい</option>
-      <option>4さい</option>
-      <option>5〜6さい</option>
-      <option>7〜8さい</option>
-      <option>9〜10さい</option>
-    </select></label></div>
+    <div>
+    <label>なんさい？
+  <select name="age">
+    <option value="0">0〜1さい</option>
+    <option value="2">2〜3さい</option>
+    <option value="4">4~5さい</option>
+    <option value="6">6〜7さい</option>
+    <option value="8">8〜9さい</option>
+    <option value="10">10さい</option>
+  </select>
+</label>
+</div>
     <div><label>おとこのこ と おんなのこ のどっち？<select name="gender">
       <option>おとこのこ</option><option>おんなのこ</option>
     </select></label></div>
@@ -89,13 +93,28 @@ HTML = """
 def index():
     return render_template_string(HTML)
 
-def story_prompt(age, gender, hero, theme):
-    return f"""あなたは子ども向け絵本のストーリー作家です。
-すべて「ひらがな」で、{age}さいの{gender}のために、しゅじんこうが「{hero}」で、テーマは「{theme}」のストーリーをかいてください。
+def story_prompt(age: str, gender: str, hero: str, theme: str) -> str:
+    age_num = int(age)
+    if age_num <= 1:
+        content = "あなたはようじむけのさっかです。すべてひらがなで、かんたんなおとやようごでかいてください。\n"
+        length = "もじすう 50から100じ"
+    elif age_num <= 3:
+        content = "あなたはようじむけのさっかです。すべてひらがなで、やさしいことばでかいてください。\n"
+        length = "もじすう 100から200じ"
+    elif age_num <= 6:
+        content = "あなたはようじむけのさっかです。すべてひらがなで、たのしいせりふやおはなしをかいてください。\n"
+        length = "もじすう 200から300じ"
+    else:
+        content = "あなたはようじむけのさっかです。すべてひらがなで、しっかりとしたぶんしょうでかいてください。\n"
+        length = "もじすう 300から500じ"
 
-さいごはこころがあたたかくなるハッピーエンドにしてください。
-こたえは「ストーリー」というキーでJSONオブジェクトにしてください。
-"""
+    return (
+        f"{content}"
+        f"・たいしょうねんれい:{age}さい ・せいべつ:{gender} ・しゅじんこう:{hero} ・てーま:{theme}\n"
+        f"・ぜん3しーんこうせい(き→しょう→けつ)・{length}\n"
+        "JSON={\"title\":\"たいとる\",\"story\":[\"しーん1\",\"しーん2\",\"しーん3\"]}"
+    )
+
 
 def dall_e(prompt):
     rsp = client.images.generate(
