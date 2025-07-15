@@ -1,161 +1,122 @@
-# app.py — あなただけのえほんジェネレーター（Flask 単体）
-# ============================================================
-from flask import Flask, render_template_string, request, jsonify, send_file
-import os, json, textwrap, datetime, traceback, sys, random, requests
+
+import os, random, sys, json, traceback
+from flask import Flask, request, jsonify
 from dotenv import load_dotenv
-from openai import OpenAI
-from PIL import Image
+from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen.canvas import Canvas
-from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.lib.utils import ImageReader
+from PIL import Image
+import openai
+import requests
 
-# ===== 共通プロンプト（日本人向け・文字なし・統一主人公） =====
-PROMPT_BASE = (
-    "Soft watercolor children’s picture-book illustration, "
-    "kawaii Japanese style, gentle pastel colors, "
-    "no text, no captions, consistent protagonist, "
-)
-
-# ===== OpenAI 初期化 =========================================
 load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-# ===== ReportLab フォント設定 =================================
-pdfmetrics.registerFont(TTFont("JPFont", "fonts/NotoSansJP-Bold.ttf"))
-IMG_SIZE, MARGIN = 512, 40
+openai.api_key = os.getenv("OPENAI_API_KEY")
+client = openai
 
 app = Flask(__name__)
 
-# -------------------------------------------------------------
-# 画像生成ラッパー
-# -------------------------------------------------------------
+font_path = "fonts/NotoSansJP-Bold.ttf"
+pdfmetrics.registerFont(TTFont("JPFont", font_path))
 
-def dall_e(prompt: str) -> str:
-    """DALL·E 3 で挿絵を生成し URL を返す"""
-    rsp = client.images.generate(
+def story_prompt(age, gender, hero, theme):
+    return f"""
+あなたは日本の子ども向け絵本作家です。
+読者は{age}の{gender}です。
+主人公は「{hero}」で、テーマは「{theme}」です。
+すべての漢字には必ずふりがなをつけてください。
+句点「。」ごとに区切って、1文ずつの配列JSONで返してください。
+文章はやさしいひらがなで、心温まる結末にしてください。
+"""
+
+def dall_e(prompt):
+    res = client.images.generate(
         model="dall-e-3",
-        prompt=PROMPT_BASE + prompt,
+        prompt=prompt + " 日本人の子ども向け、かわいい絵本のイラスト。文字なし。",
+        size="1024x1024",
+        quality="standard",
         n=1,
-        size="1024x1024"
+        response_format="url"
     )
-    return rsp.data[0].url
+    return res.data[0].url
 
-# -------------------------------------------------------------
-# 主人公ビジュアル記述を GPT で生成（1 回）
-# -------------------------------------------------------------
+def generate_pdf(story, hero_tag=""):
+    from datetime import datetime
+    filename = f"output/book_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+    os.makedirs("output", exist_ok=True)
+    c = canvas.Canvas(filename, pagesize=A4)
+    width, height = A4
 
-def get_hero_desc(hero: str) -> str:
-    """主人公キーワードを5〜10語のひらがなで視覚描写"""
-    rsp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "あなたはイラストレーターです。ユーザーが入力した主人公を、5〜10語のひらがなだけで視覚描写してください。句読点は使わず"},
-            {"role": "user", "content": hero}
-        ],
-        max_tokens=30,
-        temperature=0.7
-    )
-    return rsp.choices[0].message.content.strip()
+    for i, page in enumerate(story):
+        try:
+            url = dall_e(page[:60] + " " + hero_tag)
+            img_data = requests.get(url).content
+            img_path = f"output/temp_img_{i}.png"
+            with open(img_path, "wb") as f:
+                f.write(img_data)
 
-# -------------------------------------------------------------
-# ストーリー生成用プロンプト
-# -------------------------------------------------------------
+            img = Image.open(img_path)
+            img_width = width * 0.8
+            aspect = img.height / img.width
+            img_height = img_width * aspect
+            c.drawImage(ImageReader(img_path), (width - img_width) / 2, height - img_height - 60, width=img_width, height=img_height)
+            img.close()
 
-def story_prompt(age: str, gender: str, hero: str, theme: str) -> str:
-    return (
-        "あなたはようじむけのさっかです。すべてひらがなでかいてください。\n"
-        f"・たいしょうねんれい:{age}さい ・せいべつ:{gender} ・しゅじんこう:{hero} ・てーま:{theme}\n"
-        "・ぜん3しーんこうせい(き→しょう→けつ)・もじすう300から400じ\n"
-        "JSON={\"title\":\"たいとる\",\"story\":[\"しーん1\",\"しーん2\",\"しーん3\"]}"
-    )
-
-# -------------------------------------------------------------
-# PDF 作成
-# -------------------------------------------------------------
-
-def generate_pdf(data: dict, hero_desc: str) -> str:
-    title, scenes = data["title"], data["story"]
-    filename = f"book_{datetime.datetime.now():%Y%m%d_%H%M%S}.pdf"
-    path = f"/tmp/{filename}"
-
-    c = Canvas(path, pagesize=A4)
-    W, H = A4
-
-    for idx, scene in enumerate(scenes[:3]):
-        url = dall_e(hero_desc + ", " + scene[:60])
-        with Image.open(requests.get(url, stream=True).raw) as img:
-            img = img.resize((IMG_SIZE, IMG_SIZE), Image.LANCZOS)
-            c.drawImage(ImageReader(img), MARGIN, H-IMG_SIZE-MARGIN, IMG_SIZE, IMG_SIZE)
-
-        if idx == 0:
+            text_y = height - img_height - 80
+            c.setFont("JPFont", 20)
+            for line in page.split("。"):
+                c.drawString(50, text_y, line.strip() + "。")
+                text_y -= 24
+        except Exception as e:
+            traceback.print_exc()
             c.setFont("JPFont", 14)
-            c.drawString(MARGIN, H-IMG_SIZE-MARGIN-20, f"『{title}』")
+            c.drawString(50, 500, f"エラーが発生しました: {str(e)}")
 
-        c.setFont("JPFont", 11)
-        t = c.beginText(MARGIN, H-IMG_SIZE-MARGIN-40)
-        t.textLines(textwrap.fill(scene, 38))
-        c.drawText(t)
         c.showPage()
 
     c.save()
     return filename
 
-# ===== HTML & JS 省略（変化なし） =====
-#   ※ ここに前回の HTML テンプレートをそのまま貼り付けてください
-HTML = """<!! ここに前回の HTML を貼る !!>"""
-
-# ===== ルーティング ============================================
-@app.route('/')
+@app.route("/")
 def index():
-    return render_template_string(HTML)
+    return """
+<html>
+  <head><title>あなただけのえほん</title></head>
+  <body style="background-color:#fff0f5; font-family:sans-serif; text-align:center;">
+    <h2 style="color:#d63384;">あなただけのえほん</h2>
+    <form action="/api/book" method="POST">
+      <label>なんさい？ <input name="age" /></label><br/><br/>
+      <label>おとこのこ？おんなのこ？
+        <select name="gender"><option>おとこのこ</option><option>おんなのこ</option></select>
+      </label><br/><br/>
+      <label>しゅじんこうは？
+        <select name="hero"><option>ロボット</option><option>くるま</option><option>まほうつかい</option><option>じぶん</option></select>
+      </label><br/><br/>
+      <label>テーマは？
+        <select name="theme"><option>ゆうじょう</option><option>ぼうけん</option><option>ちょうせん</option><option>かぞく</option><option>まなび</option></select>
+      </label><br/><br/>
+      <button type="submit">えほんをつくる</button>
+    </form>
+  </body>
+</html>
+"""
 
-@app.route('/api/book', methods=['POST'])
+@app.route("/api/book", methods=["POST"])
 def api_book():
     try:
         f = request.form
-        hero_desc = get_hero_desc(f['hero'])
-        story_rsp = client.chat.completions.create(
-            model='gpt-4o-mini',
-            messages=[{"role": "system", "content": story_prompt(f['age'], f['gender'], f['hero'], f['theme'])}],
+        prompt = story_prompt(f["age"], f["gender"], f["hero"], f["theme"])
+        rsp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role":"system","content": prompt}],
             max_tokens=700,
-            response_format={"type": "json_object"}
+            temperature=0.9,
+            response_format={"type":"json_object"}
         )
-        story_json = json.loads(story_rsp.choices[0].message.content)
-
-        pages = [{
-            "img": dall_e(hero_desc + ", " + sc[:60]),
-            "text": sc
-        } for sc in story_json["story"][:3]]
-
-        return jsonify({"pages": pages})
+        story = json.loads(rsp.choices[0].message.content)["ストーリー"]
+        pdf = generate_pdf(story, f["hero"])
+        return jsonify({"file": pdf})
     except Exception as e:
-        traceback.print_exc(file=sys.stderr)
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-
-@app.route('/api/generate', methods=['POST'])
-def api_generate():
-    try:
-        f = request.form
-        hero_desc = get_hero_desc(f['hero'])
-        story_rsp = client.chat.completions.create(
-            model='gpt-4o-mini',
-            messages=[{"role": "system", "content": story_prompt(f['age'], f['gender'], f['hero'], f['theme'])}],
-            max_tokens=700,
-            response_format={"type": "json_object"}
-        )
-        story_json = json.loads(story_rsp.choices[0].message.content)
-        pdfname = generate_pdf(story_json, hero_desc)
-        return jsonify({"file": pdfname})
-    except Exception as e:
-        traceback.print_exc(file=sys.stderr)
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/pdf/<name>')
-def download(name):
-    return send_file(f"/tmp/{name}", as_attachment=True)
-
-if __name__ == '__main__':
-    port = int(os.getenv('PORT', 8000))
-    app.run(host='0.0.0.0', port=port)
