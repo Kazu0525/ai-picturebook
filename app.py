@@ -87,6 +87,7 @@ HTML = """
   button:hover { background: #ff1493; }
   img { max-width: 90%; height: auto; margin-top: 1em; border-radius: 10px; box-shadow: 0 0 6px #ccc; }
   .page p { padding: 0 1em; text-align: left; white-space: pre-wrap; }
+  #loading { display: none; margin-top: 2em; }
 </style>
 <h2>あなただけのえほん</h2>
 <form id=\"f\">
@@ -115,6 +116,13 @@ HTML = """
   </label>
   <button>えほんをつくる</button>
 </form>
+<div id=\"loading\">
+  <p>うさぎさんが絵をかいているよ…♪</p>
+  <img src=\"/static/rabbit_drawing.gif\" alt=\"生成中\" style=\"width:180px;\">
+  <audio autoplay loop>
+    <source src=\"/static/when_you_wish_upon_a_star.mp3\" type=\"audio/mpeg\">
+  </audio>
+</div>
 <audio id=\"player\" controls style=\"display:none\"></audio>
 <p id=\"msg\"></p>
 <div id=\"pages\"></div>
@@ -124,15 +132,19 @@ const btn = form.querySelector('button');
 const msg = document.getElementById('msg');
 const pages = document.getElementById('pages');
 const audio = document.getElementById('player');
+const loading = document.getElementById('loading');
 
 form.onsubmit = async e => {
   e.preventDefault();
   btn.disabled = true;
-  msg.textContent = "🚀 生成中…";
+  msg.textContent = "";
   pages.innerHTML = "";
+  loading.style.display = "block";
 
   const res = await fetch("/api/book_with_voice", { method: "POST", body: new FormData(form) });
   const data = await res.json();
+
+  loading.style.display = "none";
 
   if (data.error) {
     msg.textContent = "❌ " + data.error;
