@@ -1,7 +1,7 @@
-# app.py — あなただけのえほんジェネレーター（単体 Flask アプリ）
+# app.py — あなただけのえほんジェネレーター（音声読み上げ対応 Flask アプリ）
 # -------------------------------------------------------------
-from flask import Flask, render_template_string, request, jsonify, send_file
-import os, json, textwrap, datetime, random, traceback, sys, requests
+from flask import Flask, render_template_string, request, jsonify, send_from_directory
+import os, json, textwrap, datetime, traceback, sys, requests
 from dotenv import load_dotenv
 from openai import OpenAI
 from PIL import Image
@@ -10,9 +10,6 @@ from reportlab.pdfgen.canvas import Canvas
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-#音声読み上げ機能
-from flask import send_from_directory
-
 
 # ====== 共通プロンプト（日本人が好む・文字なし・主人公統一） ======
 PROMPT_BASE = (
@@ -21,20 +18,18 @@ PROMPT_BASE = (
     "no text, no captions, consistent protagonist, "
 )
 
-# ====== OpenAI 初期化 =================================================
+# ====== OpenAI 初期化 ======
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# ====== ReportLab 日本語フォント設定 =================================
+# ====== PDF 用フォント設定 ======
 pdfmetrics.registerFont(TTFont("JPFont", "fonts/NotoSansJP-Bold.ttf"))
-IMG_SIZE, MARGIN = 512, 40  # 画像サイズ & 余白
+IMG_SIZE, MARGIN = 512, 40
 
 app = Flask(__name__)
 
-# ====== 画像生成ラッパー（seed 未サポート版） =======================
-
+# ====== 画像生成ラッパー ======
 def dall_e(prompt: str) -> str:
-    """DALL·E 3 で挿絵を生成し URL を返す"""
     rsp = client.images.generate(
         model="dall-e-3",
         prompt=PROMPT_BASE + prompt,
@@ -43,8 +38,7 @@ def dall_e(prompt: str) -> str:
     )
     return rsp.data[0].url
 
-# ====== GPT へのプロンプト作成 =======================================
-
+# ====== プロンプト生成 ======
 def story_prompt(age: str, gender: str, hero: str, theme: str) -> str:
     return f"""
 あなたは幼児向け児童文学作家です。
@@ -53,11 +47,8 @@ def story_prompt(age: str, gender: str, hero: str, theme: str) -> str:
 JSON={{"title":"タイトル","story":["シーン1","シーン2","シーン3"]}}
 """
 
-# ====== PDF 作成 ======================================================
-
+# ====== PDF 生成 ======
 def generate_pdf(data: dict, hero_tag: str) -> str:
-    """ストーリー JSON + 主人公タグ → 挿絵付き PDF を /tmp に保存してファイル名を返す"""
-
     title, scenes = data["title"], data["story"]
     filename = f"book_{datetime.datetime.now():%Y%m%d_%H%M%S}.pdf"
     path = f"/tmp/{filename}"
@@ -65,7 +56,7 @@ def generate_pdf(data: dict, hero_tag: str) -> str:
     canvas = Canvas(path, pagesize=A4)
     W, H = A4
 
-    for idx, scene in enumerate(scenes[:3]):  # 3 ページ
+    for idx, scene in enumerate(scenes[:3]):
         url = dall_e(hero_tag + ", " + scene[:60])
         with Image.open(requests.get(url, stream=True).raw) as img:
             img = img.resize((IMG_SIZE, IMG_SIZE), Image.LANCZOS)
@@ -84,29 +75,29 @@ def generate_pdf(data: dict, hero_tag: str) -> str:
     canvas.save()
     return filename
 
-# ====== HTML テンプレート ============================================
+# ====== HTML UI ======
 HTML = """
 <!doctype html><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>あなただけのえほん</title>
-  <style>
-    body { font-family: sans-serif; background: #fff0f5; text-align: center; padding: 1em; }
-    label, select, input { font-size: 1.2em; margin: 0.5em; }
-    button { font-size: 1.3em; padding: 0.6em 2em; background: #ff69b4; color: white; border: none; border-radius: 10px; }
-    button:hover { background: #ff1493; }
-    .error { color: red; margin-top: 1em; }
-  </style>
-
+<style>
+  body { font-family: sans-serif; background: #fff0f5; text-align: center; padding: 1em; }
+  label, select, input { font-size: 1.2em; margin: 0.5em; }
+  button { font-size: 1.3em; padding: 0.6em 2em; background: #ff69b4; color: white; border: none; border-radius: 10px; }
+  button:hover { background: #ff1493; }
+  .error { color: red; margin-top: 1em; }
+</style>
 <h2>あなただけのえほん</h2>
 <form id="f">
   <label>なんさい？
     <select name="age">
-    <option value="0">0〜1さい</option>
-    <option value="2">2〜3さい</option>
-    <option value="4">4~5さい</option>
-    <option value="6">6〜7さい</option>
-    <option value="8">8〜9さい</option>
-    <option value="10">10さい</option></select>
+      <option value="0">0〜1さい</option>
+      <option value="2">2〜3さい</option>
+      <option value="4">4〜5さい</option>
+      <option value="6">6〜7さい</option>
+      <option value="8">8〜9さい</option>
+      <option value="10">10さい</option>
+    </select>
   </label>
   <label>おとこのこ と おんなのこ のどっち？
     <select name="gender"><option>おとこのこ</option><option>おんなのこ</option></select>
@@ -118,134 +109,88 @@ HTML = """
   </label>
   <label>テーマ
     <select name="theme">
-      <option>ゆうじょう</option><option>ぼうけん</option><option>ちょうせん</option>
-      <option>かぞく</option><option>まなび</option>
+      <option>ゆうじょう</option><option>ぼうけん</option><option>ちょうせん</option><option>かぞく</option><option>まなび</option>
     </select>
   </label>
   <button>えほんをつくる</button>
-  
-  #絵本を読み上げる機能追加
-  <button onclick="speakText()">よみあげる</button>
-<audio id="player" controls style="display:none"></audio>
-
-<script>
-async function speakText() {
-  const p = document.querySelector('.page p');
-  const text = p?.textContent || "";
-  const formData = new FormData();
-  formData.append("text", text);
-  const res = await fetch("/api/tts", { method: "POST", body: formData });
-  const data = await res.json();
-  if (data.url) {
-    const audio = document.getElementById("player");
-    audio.src = data.url;
-    audio.style.display = "block";
-    audio.play();
-  }
-}
-</script>
 </form>
-
+<audio id="player" controls style="display:none"></audio>
 <p id="msg"></p>
 <div id="pages"></div>
-
 <script>
-const form  = document.getElementById('f');
-const btn   = form.querySelector('button');
-const msg   = document.getElementById('msg');
+const form = document.getElementById('f');
+const btn = form.querySelector('button');
+const msg = document.getElementById('msg');
 const pages = document.getElementById('pages');
+const audio = document.getElementById('player');
 
-form.onsubmit = async e=>{
+form.onsubmit = async e => {
   e.preventDefault();
   btn.disabled = true;
   msg.textContent = "🚀 生成中…";
   pages.innerHTML = "";
 
-  const res = await fetch("/api/book",{method:"POST",body:new FormData(form)});
-  let data;
-  try{ data = await res.json(); }
-  catch{ msg.textContent="❌ サーバーエラー"; btn.disabled=false; return; }
+  const res = await fetch("/api/book_with_voice", { method: "POST", body: new FormData(form) });
+  const data = await res.json();
 
-  if(data.error){ msg.textContent="❌ "+data.error; btn.disabled=false; return; }
+  if (data.error) {
+    msg.textContent = "❌ " + data.error;
+    btn.disabled = false;
+    return;
+  }
 
   msg.textContent = "✅ 完了！";
-  data.pages.forEach(pg=>{
-    pages.insertAdjacentHTML("beforeend",
-      `<div class="page"><img src="${pg.img}"><p>${pg.text}</p></div>`);
+  data.pages.forEach(pg => {
+    pages.insertAdjacentHTML("beforeend", `
+      <div class="page">
+        <img src="${pg.img}" />
+        <p>${pg.text}</p>
+      </div>`);
   });
+
+  if (data.audio_url) {
+    audio.src = data.audio_url;
+    audio.style.display = "block";
+    audio.play();
+  }
+
   btn.disabled = false;
 };
 </script>
 """
 
-# ====== ルーティング ==================================================
+# ====== Flask ルーティング ======
 @app.route("/")
 def index():
     return render_template_string(HTML)
 
-
-@app.route("/api/book", methods=["POST"])
-def api_book():
+@app.route("/api/book_with_voice", methods=["POST"])
+def api_book_with_voice():
     try:
         f = request.form
         rsp = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role":"system","content": story_prompt(f['age'], f['gender'], f['hero'], f['theme'])}],
-            max_tokens=700,
-            response_format={"type":"json_object"}
-        )
-        story_json = json.loads(rsp.choices[0].message.content)
-        hero_tag = f"main character is a {f['hero']}"
-        pages = [{"img": dall_e(hero_tag + ", " + sc[:60]), "text": sc} for sc in story_json["story"][:3]]
-        return jsonify({"pages": pages})
-    except Exception as e:
-        traceback.print_exc(file=sys.stderr)
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/generate", methods=["POST"])
-def api_generate():
-    """PDF ダウンロード用エンドポイント"""
-    try:
-        f = request.form
-        hero_tag = f"main character is a {f['hero']}"
-
-        # 1. ストーリー JSON を取得
-        rsp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{
-                "role": "system",
-                "content": story_prompt(f['age'], f['gender'], f['hero'], f['theme'])
-            }],
+            messages=[{"role": "system", "content": story_prompt(f['age'], f['gender'], f['hero'], f['theme'])}],
             max_tokens=700,
             response_format={"type": "json_object"}
         )
-
-        # 2. 挿絵付き PDF を作成
         story_json = json.loads(rsp.choices[0].message.content)
-        pdfname = generate_pdf(story_json, hero_tag)
 
-        # 3. フロントへファイル名を返す
-        return jsonify({"file": pdfname})
-
-    except Exception as e:
-        traceback.print_exc(file=sys.stderr)
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/tts", methods=["POST"])
-def api_tts():
-    try:
-        text = request.form["text"]
+        story_text = "。".join(story_json["story"])
         filename = f"tts_{datetime.datetime.now():%Y%m%d_%H%M%S}.mp3"
         path = os.path.join("/tmp", filename)
 
         speech = client.audio.speech.create(
             model="tts-1",
-            voice="shimmer",  # 他に 'alloy', 'echo', 'fable', 'onyx', 'nova' なども選択可
-            input=text
+            voice="shimmer",
+            input=story_text
         )
         speech.stream_to_file(path)
-        return jsonify({"url": f"/audio/{filename}"})
+
+        hero_tag = f"main character is a {f['hero']}"
+        pages = [{"img": dall_e(hero_tag + ", " + sc[:60]), "text": sc} for sc in story_json["story"][:3]]
+
+        return jsonify({"pages": pages, "audio_url": f"/audio/{filename}"})
 
     except Exception as e:
         traceback.print_exc(file=sys.stderr)
@@ -254,5 +199,3 @@ def api_tts():
 @app.route("/audio/<filename>")
 def serve_audio(filename):
     return send_from_directory("/tmp", filename, mimetype="audio/mpeg")
-
-
