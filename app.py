@@ -77,46 +77,47 @@ def generate_pdf(data: dict, hero_tag: str) -> str:
 
 # ====== HTML UI ======
 HTML = """
-<!doctype html><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<!doctype html><meta charset=\"utf-8\">
+<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
 <title>あなただけのえほん</title>
 <style>
   body { font-family: sans-serif; background: #fff0f5; text-align: center; padding: 1em; }
-  label, select, input { font-size: 1.2em; margin: 0.5em; }
-  button { font-size: 1.3em; padding: 0.6em 2em; background: #ff69b4; color: white; border: none; border-radius: 10px; }
+  label, select, input, button { font-size: 1.2em; display: block; margin: 0.8em auto; width: 90%; max-width: 320px; }
+  button { padding: 0.6em 2em; background: #ff69b4; color: white; border: none; border-radius: 10px; }
   button:hover { background: #ff1493; }
-  .error { color: red; margin-top: 1em; }
+  img { max-width: 90%; height: auto; margin-top: 1em; border-radius: 10px; box-shadow: 0 0 6px #ccc; }
+  .page p { padding: 0 1em; text-align: left; white-space: pre-wrap; }
 </style>
 <h2>あなただけのえほん</h2>
-<form id="f">
-  <label>なんさい？
-    <select name="age">
-      <option value="0">0〜1さい</option>
-      <option value="2">2〜3さい</option>
-      <option value="4">4〜5さい</option>
-      <option value="6">6〜7さい</option>
-      <option value="8">8〜9さい</option>
-      <option value="10">10さい</option>
+<form id=\"f\">
+  <label>なんさい？<br>
+    <select name=\"age\">
+      <option value=\"0\">0〜1さい</option>
+      <option value=\"2\">2〜3さい</option>
+      <option value=\"4\">4〜5さい</option>
+      <option value=\"6\">6〜7さい</option>
+      <option value=\"8\">8〜9さい</option>
+      <option value=\"10\">10さい</option>
     </select>
   </label>
-  <label>おとこのこ と おんなのこ のどっち？
-    <select name="gender"><option>おとこのこ</option><option>おんなのこ</option></select>
+  <label>おとこのこ と おんなのこ のどっち？<br>
+    <select name=\"gender\"><option>おとこのこ</option><option>おんなのこ</option></select>
   </label>
-  <label>しゅじんこう
-    <select name="hero">
+  <label>しゅじんこう<br>
+    <select name=\"hero\">
       <option>ろぼっと</option><option>くるま</option><option>まほうつかい</option><option>じぶん</option>
     </select>
   </label>
-  <label>テーマ
-    <select name="theme">
+  <label>テーマ<br>
+    <select name=\"theme\">
       <option>ゆうじょう</option><option>ぼうけん</option><option>ちょうせん</option><option>かぞく</option><option>まなび</option>
     </select>
   </label>
   <button>えほんをつくる</button>
 </form>
-<audio id="player" controls style="display:none"></audio>
-<p id="msg"></p>
-<div id="pages"></div>
+<audio id=\"player\" controls style=\"display:none\"></audio>
+<p id=\"msg\"></p>
+<div id=\"pages\"></div>
 <script>
 const form = document.getElementById('f');
 const btn = form.querySelector('button');
@@ -142,8 +143,8 @@ form.onsubmit = async e => {
   msg.textContent = "✅ 完了！";
   data.pages.forEach(pg => {
     pages.insertAdjacentHTML("beforeend", `
-      <div class="page">
-        <img src="${pg.img}" />
+      <div class=\"page\">
+        <img src=\"${pg.img}\" />
         <p>${pg.text}</p>
       </div>`);
   });
