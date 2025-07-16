@@ -10,6 +10,9 @@ from reportlab.pdfgen.canvas import Canvas
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+#音声読み上げ機能
+from flask import send_from_directory
+
 
 # ====== 共通プロンプト（日本人が好む・文字なし・主人公統一） ======
 PROMPT_BASE = (
@@ -120,6 +123,27 @@ HTML = """
     </select>
   </label>
   <button>えほんをつくる</button>
+  
+  #絵本を読み上げる機能追加
+  <button onclick="speakText()">よみあげる</button>
+<audio id="player" controls style="display:none"></audio>
+
+<script>
+async function speakText() {
+  const p = document.querySelector('.page p');
+  const text = p?.textContent || "";
+  const formData = new FormData();
+  formData.append("text", text);
+  const res = await fetch("/api/tts", { method: "POST", body: formData });
+  const data = await res.json();
+  if (data.url) {
+    const audio = document.getElementById("player");
+    audio.src = data.url;
+    audio.style.display = "block";
+    audio.play();
+  }
+}
+</script>
 </form>
 
 <p id="msg"></p>
@@ -207,4 +231,28 @@ def api_generate():
     except Exception as e:
         traceback.print_exc(file=sys.stderr)
         return jsonify({"error": str(e)}), 500
+
+@app.route("/api/tts", methods=["POST"])
+def api_tts():
+    try:
+        text = request.form["text"]
+        filename = f"tts_{datetime.datetime.now():%Y%m%d_%H%M%S}.mp3"
+        path = os.path.join("/tmp", filename)
+
+        speech = client.audio.speech.create(
+            model="tts-1",
+            voice="shimmer",  # 他に 'alloy', 'echo', 'fable', 'onyx', 'nova' なども選択可
+            input=text
+        )
+        speech.stream_to_file(path)
+        return jsonify({"url": f"/audio/{filename}"})
+
+    except Exception as e:
+        traceback.print_exc(file=sys.stderr)
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/audio/<filename>")
+def serve_audio(filename):
+    return send_from_directory("/tmp", filename, mimetype="audio/mpeg")
+
 
