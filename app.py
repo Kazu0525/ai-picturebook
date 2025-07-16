@@ -156,42 +156,7 @@ form.onsubmit = async e => {
     return;
   }
 
-  msg.textContent = "✅ 完了！";
-  data.pages.forEach(pg => {
-    pages.insertAdjacentHTML("beforeend", `
-      <div class=\"page\">
-        <img src=\"${pg.img}\" />
-        <p>${pg.text}</p>
-      </div>`);
-  });
-
-  if (data.audio_url) {
-    audio.src = data.audio_url;
-    audio.style.display = "block";
-    audio.play();
-  }
-
-  btn.disabled = false;
-    return;
-  }
-
-  msg.textContent = "✅ 完了！";
-  data.pages.forEach(pg => {
-    pages.insertAdjacentHTML("beforeend", `
-      <div class=\"page\">
-        <img src=\"${pg.img}\" />
-        <p>${pg.text}</p>
-      </div>`);
-  });
-
-  if (data.audio_url) {
-    audio.src = data.audio_url;
-    audio.style.display = "block";
-    audio.play();
-  }
-
-  btn.disabled = false;
-};
+  
 </script>
 """
 
