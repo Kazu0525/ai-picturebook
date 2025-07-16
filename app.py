@@ -26,7 +26,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 pdfmetrics.registerFont(TTFont("JPFont", "fonts/NotoSansJP-Bold.ttf"))
 IMG_SIZE, MARGIN = 512, 40
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder="static")
 
 # ====== 画像生成ラッパー ======
 def dall_e(prompt: str) -> str:
@@ -119,7 +119,7 @@ HTML = """
 <div id=\"loading\">
   <p>うさぎさんが絵をかいているよ…♪</p>
   <img src=\"/static/rabbit_drawing.gif\" alt=\"生成中\" style=\"width:180px;\">
-  <audio autoplay loop>
+  <audio id=\"bgm\" loop>
     <source src=\"/static/when_you_wish_upon_a_star.mp3\" type=\"audio/mpeg\">
   </audio>
 </div>
@@ -135,6 +135,7 @@ const audio = document.getElementById('player');
 const loading = document.getElementById('loading');
 
 form.onsubmit = async e => {
+  try { document.getElementById('bgm').play(); } catch (e) {}
   e.preventDefault();
   btn.disabled = true;
   msg.textContent = "";
