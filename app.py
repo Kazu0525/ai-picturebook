@@ -135,8 +135,9 @@ const audio = document.getElementById('player');
 const loading = document.getElementById('loading');
 
 form.onsubmit = async e => {
-  try { document.getElementById('bgm').play(); } catch (e) {}
   e.preventDefault();
+  const bgm = document.getElementById('bgm');
+  try { bgm.play(); } catch (e) {}
   btn.disabled = true;
   msg.textContent = "";
   pages.innerHTML = "";
@@ -146,10 +147,31 @@ form.onsubmit = async e => {
   const data = await res.json();
 
   loading.style.display = "none";
+  bgm.pause();
+  bgm.currentTime = 0;
 
   if (data.error) {
     msg.textContent = "❌ " + data.error;
     btn.disabled = false;
+    return;
+  }
+
+  msg.textContent = "✅ 完了！";
+  data.pages.forEach(pg => {
+    pages.insertAdjacentHTML("beforeend", `
+      <div class=\"page\">
+        <img src=\"${pg.img}\" />
+        <p>${pg.text}</p>
+      </div>`);
+  });
+
+  if (data.audio_url) {
+    audio.src = data.audio_url;
+    audio.style.display = "block";
+    audio.play();
+  }
+
+  btn.disabled = false;
     return;
   }
 
